@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Eóus — AI 조류 분류기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#0a1628;--accent:#4a7fd4;--accent-bright:#6b9ee8;
+  --text-primary:#e8edf5;--text-secondary:#8da4c0;--text-muted:#4d6a8a;
+  --border:rgba(74,127,212,0.2);--border-hover:rgba(74,127,212,0.45);
+  --success:#2dd4a0;--success-dim:rgba(45,212,160,0.15);
+}
+body{font-family:'Inter',sans-serif;background:var(--navy);color:var(--text-primary);min-height:100vh;overflow-x:hidden;transition:background 0.8s ease}
+body.theme-sparrow{background:#2b1a0e}
+body.theme-magpie{background:#0e1a2e}
+body.theme-pigeon{background:#1a1a1f}
+body.theme-cuckoo{background:#0b1f2e}
+body.theme-unknown{background:#0d1f15}
+.bg-canvas{position:fixed;inset:0;z-index:0;overflow:hidden}
+.bg-canvas svg{width:100%;height:100%}
+.bg-layer{position:absolute;inset:0;opacity:0;transition:opacity 0.8s ease;pointer-events:none}
+.bg-layer.active{opacity:0.35}
+.app{position:relative;z-index:1;max-width:720px;margin:0 auto;padding:0 20px 80px}
+header{display:flex;align-items:center;justify-content:space-between;padding:28px 0 24px;border-bottom:0.5px solid var(--border);margin-bottom:0}
+.logo{font-family:'Cormorant Garamond',serif;font-size:38px;font-weight:500;letter-spacing:-0.5px;line-height:1}
+.logo-sub{font-size:10px;letter-spacing:0.22em;color:var(--text-muted);text-transform:uppercase;margin-top:5px}
+.header-badge{font-size:12px;color:var(--text-secondary);border:0.5px solid var(--border);padding:6px 14px;border-radius:20px}
+/* HOME */
+#home-screen{padding-top:60px;text-align:center}
+.home-tagline{font-family:'Cormorant Garamond',serif;font-size:52px;font-weight:500;line-height:1.1;margin-bottom:16px}
+.home-desc{font-size:15px;color:var(--text-secondary);line-height:1.8;max-width:480px;margin:0 auto 40px}
+.home-cta-group{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.bird-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-top:48px}
+.bird-card{background:rgba(21,40,71,0.7);border:0.5px solid var(--border);border-radius:16px;padding:20px 12px 16px;cursor:pointer;transition:background 0.2s,border-color 0.2s,transform 0.15s;text-align:center}
+.bird-card:hover{background:rgba(74,127,212,0.12);border-color:var(--border-hover);transform:translateY(-2px)}
+.bird-card .emoji{font-size:32px;display:block;margin-bottom:10px}
+.bird-card .bname{font-size:15px;font-weight:500;margin-bottom:4px}
+.bird-card .sci{font-family:'Cormorant Garamond',serif;font-style:italic;font-size:12px;color:var(--text-muted)}
+/* CLASSIFIER */
+#classifier-screen{display:none;padding-top:32px}
+.card{background:linear-gradient(160deg,rgba(21,40,71,0.88) 0%,rgba(10,22,40,0.94) 100%);border:0.5px solid var(--border);border-radius:20px;overflow:hidden;backdrop-filter:blur(8px);transition:border-color 0.6s ease}
+body.theme-sparrow .card{border-color:rgba(160,90,30,0.35)}
+body.theme-magpie .card{border-color:rgba(74,127,212,0.45)}
+body.theme-pigeon .card{border-color:rgba(140,140,150,0.35)}
+body.theme-cuckoo .card{border-color:rgba(40,140,200,0.4)}
+body.theme-unknown .card{border-color:rgba(50,140,80,0.3)}
+.camera-zone{position:relative;width:100%;aspect-ratio:4/3;background:#050d1a;overflow:hidden}
+.camera-zone video,.camera-zone img{width:100%;height:100%;object-fit:cover;display:block}
+/* 좌우반전 */
+.camera-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;color:var(--text-muted)}
+.icon-ring{width:80px;height:80px;border-radius:50%;border:1.5px dashed var(--text-muted);display:flex;align-items:center;justify-content:center;opacity:0.6}
+.icon-ring svg{width:32px;height:32px;stroke:var(--text-muted);fill:none}
+.camera-placeholder p{font-size:14px;color:var(--text-secondary)}
+.camera-placeholder small{font-size:12px;color:var(--text-muted)}
+.live-badge{position:absolute;top:14px;left:14px;background:rgba(10,22,40,0.75);border:0.5px solid rgba(229,55,55,0.4);border-radius:20px;padding:4px 10px;font-size:11px;display:none;align-items:center;gap:6px;z-index:2}
+.live-badge .dot{width:6px;height:6px;border-radius:50%;background:#e53535;animation:pulse 1.2s ease-in-out infinite}
+.live-confidence{position:absolute;top:12px;right:12px;background:rgba(10,22,40,0.82);border:1px solid rgba(45,212,160,0.5);border-radius:14px;padding:8px 16px;font-size:16px;font-weight:600;color:var(--success);display:none;flex-direction:column;align-items:center;gap:2px;backdrop-filter:blur(6px);z-index:2;letter-spacing:0.01em;line-height:1.2;text-align:center}
+.live-confidence .conf-label{font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:0.1em;text-transform:uppercase}
+/* 사진찍기 버튼 - 카메라 존 하단 중앙 오버레이 */
+.capture-btn-overlay{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:none;z-index:3}
+.btn-capture-shutter{width:60px;height:60px;border-radius:50%;border:3px solid rgba(255,255,255,0.9);background:rgba(255,255,255,0.15);backdrop-filter:blur(4px);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.15s,transform 0.1s;box-shadow:0 0 0 4px rgba(255,255,255,0.15)}
+.btn-capture-shutter:hover{background:rgba(255,255,255,0.3)}
+.btn-capture-shutter:active{transform:scale(0.92)}
+.btn-capture-shutter svg{width:26px;height:26px;stroke:#fff;fill:none;stroke-width:1.8}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.analyzing-overlay{position:absolute;inset:0;background:rgba(10,22,40,0.75);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:4}
+.spinner{width:32px;height:32px;border:2px solid rgba(74,127,212,0.25);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.analyzing-overlay p{font-size:13px;color:var(--text-secondary)}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:20px}
+.btn{height:48px;border-radius:12px;border:0.5px solid var(--border);background:transparent;color:var(--text-primary);font-family:'Inter',sans-serif;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:background 0.18s,border-color 0.18s;letter-spacing:0.02em}
+.btn:hover{background:rgba(74,127,212,0.1);border-color:var(--border-hover)}
+.btn:active{transform:scale(0.98)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+.btn.primary:hover{background:var(--accent-bright);border-color:var(--accent-bright)}
+.btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8}
+.btn-back{grid-column:1/-1;opacity:0.6;font-size:13px}
+#file-input{display:none}
+.divider{height:0.5px;background:var(--border);margin:0 20px}
+.status-msg{padding:16px 20px;font-size:13px;color:var(--text-secondary);text-align:center;display:none}
+.status-msg.visible{display:block}
+.unknown-msg{text-align:center;padding:28px 20px;display:none}
+.unknown-msg.visible{display:block}
+.unknown-emoji{font-size:48px;margin-bottom:12px}
+.unknown-text{font-size:16px;color:var(--text-secondary);line-height:1.7}
+.result-panel{padding:24px 20px;display:none}
+.result-panel.visible{display:block}
+.result-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.result-label{font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-muted)}
+.confidence-badge{font-size:13px;font-weight:500;padding:4px 12px;border-radius:20px;background:var(--success-dim);color:var(--success);border:0.5px solid rgba(45,212,160,0.3)}
+.bird-name{font-family:'Cormorant Garamond',serif;font-size:34px;font-weight:500;line-height:1.1;margin-bottom:4px}
+.bird-scientific{font-family:'Cormorant Garamond',serif;font-style:italic;font-size:16px;color:var(--text-secondary);margin-bottom:12px}
+.bird-desc{font-size:14px;line-height:1.75;color:var(--text-secondary);padding:14px 16px;background:rgba(255,255,255,0.04);border-radius:10px;border:0.5px solid var(--border)}
+.prob-list{display:flex;flex-direction:column;gap:10px;margin-top:20px;padding-top:20px;border-top:0.5px solid var(--border)}
+.prob-row{display:flex;align-items:center;gap:12px}
+.prob-name{font-size:13px;color:var(--text-secondary);min-width:60px;max-width:110px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prob-track{flex:1;height:3px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden}
+.prob-fill{height:100%;border-radius:2px;background:var(--accent);transition:width 0.5s cubic-bezier(0.16,1,0.3,1)}
+.prob-fill.top{background:var(--success)}
+.prob-pct{font-size:12px;color:var(--text-muted);min-width:38px;text-align:right}
+.extra-block{margin-top:16px}
+.ticker-wrap{background:rgba(40,140,200,0.08);border:0.5px solid rgba(40,140,200,0.25);border-radius:10px;padding:12px 14px;margin-top:14px}
+.ticker-title{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#5bbfe8;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.ticker-dot{width:6px;height:6px;border-radius:50%;background:#5bbfe8;animation:pulse 1.2s infinite}
+.ticker-item{font-size:13px;color:var(--text-secondary);padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,0.06);display:flex;gap:8px;align-items:baseline}
+.ticker-item:last-child{border-bottom:none}
+.ticker-item .loc{color:#5bbfe8;font-weight:500;flex-shrink:0}
+.ticker-time{color:var(--text-muted);font-size:11px;margin-left:auto}
+.pigeon-btn{display:inline-flex;align-items:center;gap:8px;margin-top:14px;padding:10px 18px;background:rgba(150,150,170,0.12);border:0.5px solid rgba(150,150,170,0.3);border-radius:10px;color:var(--text-secondary);font-size:13px;cursor:pointer;transition:background 0.2s;font-family:'Inter',sans-serif}
+.pigeon-btn:hover{background:rgba(150,150,170,0.22)}
+.pigeon-card{background:rgba(255,255,255,0.04);border:0.5px solid rgba(150,150,170,0.2);border-radius:10px;padding:14px 16px;margin-bottom:10px}
+.pigeon-card:last-child{margin-bottom:0}
+.pigeon-card-title{font-size:14px;font-weight:500;color:var(--text-primary);margin-bottom:6px}
+.pigeon-card-title span{font-family:'Cormorant Garamond',serif;font-style:italic;font-size:13px;color:var(--text-muted);margin-left:6px;font-weight:400}
+.pigeon-card-desc{font-size:13px;color:var(--text-secondary);line-height:1.7}
+footer{text-align:center;margin-top:36px;font-size:12px;color:var(--text-muted)}
+@media(max-width:480px){.logo{font-size:28px}.bird-name{font-size:26px}.controls{grid-template-columns:1fr}.home-tagline{font-size:36px}.bird-cards{grid-template-columns:repeat(2,1fr)}}
+
+/* modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(5,10,20,0.88);z-index:100;display:none;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(6px)}
+.modal-overlay.open{display:flex}
+.modal-box{position:relative;width:100%;max-width:400px;background:linear-gradient(160deg,rgba(21,40,71,0.97) 0%,rgba(10,22,40,0.99) 100%);border:0.5px solid var(--border);border-radius:24px;overflow:hidden}
+.modal-close{position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.08);border:none;color:var(--text-muted);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10;transition:background 0.2s}
+.modal-close:hover{background:rgba(255,255,255,0.15)}
+.card-slider{overflow:hidden;width:100%}
+.card-track{display:flex;transition:transform 0.45s cubic-bezier(0.16,1,0.3,1)}
+.sparrow-card{min-width:100%;padding:36px 28px 20px}
+.sparrow-card .card-emoji{font-size:64px;text-align:center;display:block;margin-bottom:16px;filter:drop-shadow(0 4px 12px rgba(0,0,0,0.4))}
+.sparrow-card .card-num{font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:var(--text-muted);text-align:center;margin-bottom:8px}
+.sparrow-card .card-title{font-family:"Cormorant Garamond",serif;font-size:28px;font-weight:500;text-align:center;margin-bottom:4px}
+.sparrow-card .card-sci{font-family:"Cormorant Garamond",serif;font-style:italic;font-size:14px;color:var(--text-muted);text-align:center;margin-bottom:18px}
+.sparrow-card .card-desc{font-size:13px;color:var(--text-secondary);line-height:1.8;text-align:center}
+.sparrow-card .card-tag{display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:14px}
+.sparrow-card .card-tag span{padding:4px 12px;border-radius:20px;font-size:11px;border:0.5px solid var(--border);color:var(--text-muted)}
+.sparrow-card.final .card-title{background:linear-gradient(135deg,#c8e6ff,#ffffff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;font-size:30px}
+.sparrow-card.final .card-emoji{animation:floatBird 2.5s ease-in-out infinite}
+@keyframes floatBird{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.tada-text{font-size:20px;text-align:center;margin-bottom:6px}
+.sparkle{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden}
+.sparkle span{position:absolute;font-size:16px;animation:sparklefall 2.2s ease-in forwards}
+@keyframes sparklefall{0%{opacity:1;transform:translateY(-10px) rotate(0deg)}100%{opacity:0;transform:translateY(200px) rotate(720deg)}}
+.modal-nav{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 22px;gap:12px}
+.nav-arrow{width:40px;height:40px;border-radius:50%;border:0.5px solid var(--border);background:transparent;color:var(--text-secondary);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.2s;flex-shrink:0}
+.nav-arrow:hover{background:rgba(74,127,212,0.15);border-color:var(--border-hover)}
+.nav-arrow:disabled{opacity:0.2;cursor:default}
+.nav-dots{display:flex;gap:6px;align-items:center}
+.nav-dot{width:6px;height:6px;border-radius:50%;background:var(--text-muted);transition:all 0.3s ease;cursor:pointer}
+.nav-dot.active{width:20px;border-radius:3px;background:var(--accent)}
+</style>
+</head>
+<body>
+
+<div class="bg-canvas">
+<svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+<defs><filter id="bl"><feGaussianBlur stdDeviation="65"/></filter></defs>
+<g id="bg-default" class="bg-layer active" filter="url(#bl)">
+  <ellipse cx="200" cy="150" rx="350" ry="250" fill="#1a3a6e" opacity="0.8"><animateTransform attributeName="transform" type="rotate" from="0 200 150" to="360 200 150" dur="40s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="1000" cy="600" rx="400" ry="280" fill="#0f2a5a" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="360 1000 600" to="0 1000 600" dur="50s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="650" cy="400" rx="300" ry="200" fill="#162d5c" opacity="0.5"><animateTransform attributeName="transform" type="rotate" from="0 650 400" to="-360 650 400" dur="35s" repeatCount="indefinite"/></ellipse>
+</g>
+<g id="bg-sparrow" class="bg-layer" filter="url(#bl)">
+  <ellipse cx="300" cy="200" rx="380" ry="260" fill="#7a3b1a" opacity="0.8"><animateTransform attributeName="transform" type="rotate" from="0 300 200" to="360 300 200" dur="38s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="900" cy="550" rx="350" ry="240" fill="#5a2a10" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="180 900 550" to="-180 900 550" dur="45s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="600" cy="350" rx="250" ry="180" fill="#8a4a20" opacity="0.5"><animateTransform attributeName="transform" type="rotate" from="0 600 350" to="360 600 350" dur="30s" repeatCount="indefinite"/></ellipse>
+</g>
+<g id="bg-magpie" class="bg-layer" filter="url(#bl)">
+  <ellipse cx="200" cy="600" rx="400" ry="280" fill="#1a2f6e" opacity="0.9"><animateTransform attributeName="transform" type="rotate" from="0 200 600" to="360 200 600" dur="42s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="900" cy="200" rx="350" ry="240" fill="#0f1a4a" opacity="0.8"><animateTransform attributeName="transform" type="rotate" from="90 900 200" to="-270 900 200" dur="48s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="550" cy="450" rx="280" ry="200" fill="#2a3a7a" opacity="0.6"><animateTransform attributeName="transform" type="rotate" from="0 550 450" to="360 550 450" dur="33s" repeatCount="indefinite"/></ellipse>
+</g>
+<g id="bg-pigeon" class="bg-layer" filter="url(#bl)">
+  <ellipse cx="350" cy="250" rx="370" ry="260" fill="#5a5a68" opacity="0.8"><animateTransform attributeName="transform" type="rotate" from="0 350 250" to="360 350 250" dur="44s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="850" cy="580" rx="360" ry="240" fill="#3a3a44" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="120 850 580" to="-240 850 580" dur="52s" repeatCount="indefinite"/></ellipse>
+</g>
+<g id="bg-cuckoo" class="bg-layer" filter="url(#bl)">
+  <ellipse cx="600" cy="150" rx="500" ry="200" fill="#1a4a7a" opacity="0.8"><animateTransform attributeName="transform" type="rotate" from="0 600 150" to="360 600 150" dur="40s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="200" cy="650" rx="380" ry="250" fill="#0a2a5a" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="180 200 650" to="-180 200 650" dur="46s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="950" cy="400" rx="300" ry="200" fill="#2a6a9a" opacity="0.5"><animateTransform attributeName="transform" type="rotate" from="0 950 400" to="360 950 400" dur="36s" repeatCount="indefinite"/></ellipse>
+</g>
+<g id="bg-unknown" class="bg-layer" filter="url(#bl)">
+  <ellipse cx="400" cy="300" rx="400" ry="280" fill="#1a3a20" opacity="0.9"><animateTransform attributeName="transform" type="rotate" from="0 400 300" to="360 400 300" dur="42s" repeatCount="indefinite"/></ellipse>
+  <ellipse cx="800" cy="500" rx="350" ry="230" fill="#0f2a15" opacity="0.7"><animateTransform attributeName="transform" type="rotate" from="60 800 500" to="-300 800 500" dur="50s" repeatCount="indefinite"/></ellipse>
+</g>
+</svg>
+</div>
+
+<!-- 🔊 새 소리 오디오 요소 (파일명은 임시값이니 실제 파일 경로로 교체하세요) -->
+<audio id="snd-sparrow" src="sparrow.wav" preload="auto"></audio>
+<audio id="snd-magpie" src=magpie.wav preload="auto"></audio>
+<audio id="snd-pigeon" src="pigeon.mp3" preload="auto"></audio>
+<audio id="snd-cuckoo" src="cuckoo.wav" preload="auto"></audio>
+
+<div class="app">
+  <header>
+    <div>
+      <div class="logo">Eóus</div>
+      <div class="logo-sub">AI Image Classifier</div>
+    </div>
+    <div class="header-badge">조류 판별 모델 v1</div>
+  </header>
+
+  <!-- HOME -->
+  <div id="home-screen">
+    <div style="padding-top:60px;text-align:center">
+      <div class="home-tagline">눈앞의 새,<br>바로 알아보세요</div>
+      <p class="home-desc">사진을 찍거나 업로드하면 AI가 즉시 새의 종류를 분류합니다.<br>참새, 까치, 비둘기, 뻐꾸기를 실시간으로 판별해드립니다.</p>
+      <div class="home-cta-group">
+        <button class="btn primary" onclick="goToClassifier('camera')" style="padding:0 28px;height:52px;font-size:15px;">
+          <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          카메라로 분류하기
+        </button>
+        <button class="btn" onclick="goToClassifier('upload')" style="padding:0 28px;height:52px;font-size:15px;">
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          사진 업로드
+        </button>
+      </div>
+      <div class="bird-cards">
+        <div class="bird-card" onclick="openBirdModal('sparrow')"><span class="emoji">🐦</span><div class="bname">참새</div><div class="sci">Passer montanus</div></div>
+        <div class="bird-card" onclick="openBirdModal('magpie')"><span class="emoji">🦅</span><div class="bname">까치</div><div class="sci">Pica pica</div></div>
+        <div class="bird-card" onclick="openBirdModal('pigeon')"><span class="emoji">🕊️</span><div class="bname">비둘기</div><div class="sci">Columba livia</div></div>
+        <div class="bird-card" onclick="openBirdModal('cuckoo')"><span class="emoji">🌿</span><div class="bname">뻐꾸기</div><div class="sci">Cuculus canorus</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 새 도감/상식 모달 (참새·까치·비둘기·뻐꾸기 공용) -->
+  <div class="modal-overlay" id="bird-modal" onclick="closeBirdModal(event)">
+    <div class="modal-box">
+      <button class="modal-close" onclick="document.getElementById('bird-modal').classList.remove('open')">✕</button>
+      <div class="sparkle" id="modal-sparkle"></div>
+      <div class="card-slider">
+        <div class="card-track" id="card-track"></div>
+      </div>
+      <div class="modal-nav">
+        <button class="nav-arrow" id="nav-prev" onclick="moveCard(-1)">‹</button>
+        <div class="nav-dots" id="nav-dots"></div>
+        <button class="nav-arrow" id="nav-next" onclick="moveCard(1)">›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CLASSIFIER -->
+  <div id="classifier-screen">
+    <div class="card">
+      <div class="camera-zone" id="camera-zone">
+        <div class="camera-placeholder" id="placeholder">
+          <div class="icon-ring"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>
+          <p>사진을 업로드하거나 카메라를 시작하세요</p>
+          <small>AI가 새의 종류를 실시간으로 판별합니다</small>
+        </div>
+        <video id="webcam-video" autoplay playsinline style="display:none;width:100%;height:100%;object-fit:cover;"></video>
+        <img id="preview-img" style="display:none;" alt="업로드된 이미지">
+
+        <div class="live-badge" id="live-badge"><span class="dot"></span>실시간</div>
+        <div class="live-confidence" id="live-confidence">분석 대기 중...</div>
+
+        <!-- 사진 찍기 셔터 버튼 (카메라 켜졌을 때만 표시) -->
+        <div class="capture-btn-overlay" id="capture-overlay">
+          <button class="btn-capture-shutter" onclick="captureAndClassify()" title="사진 찍기">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="white" stroke="none"/><path d="M20 7h-2.5L16 5H8L6.5 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/></svg>
+          </button>
+        </div>
+
+        <div class="analyzing-overlay" id="analyzing"><div class="spinner"></div><p>분류 중...</p></div>
+      </div>
+
+      <div class="controls">
+        <button class="btn" id="btn-camera" onclick="toggleCamera()">
+          <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          카메라 켜기
+        </button>
+        <button class="btn primary" onclick="document.getElementById('file-input').click()">
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          이미지 업로드
+        </button>
+        <button class="btn btn-back" onclick="goHome()">← 홈으로 돌아가기</button>
+        <input type="file" id="file-input" accept="image/*" capture="environment" onchange="handleFileUpload(event)">
+      </div>
+
+      <div class="status-msg" id="status-msg"></div>
+
+      <div class="unknown-msg" id="unknown-msg">
+        <div class="unknown-emoji">🌿</div>
+        <div class="unknown-text">이건 배경인 것 같습니다..<br><small style="font-size:13px;color:var(--text-muted)">새가 명확히 인식되지 않았습니다. 더 가까이서 찍어보세요.</small></div>
+      </div>
+
+      <div class="divider" id="result-divider" style="display:none"></div>
+      <div class="result-panel" id="result-panel">
+        <div class="result-header">
+          <span class="result-label">인식 결과</span>
+          <span class="confidence-badge" id="conf-badge">신뢰도 —</span>
+        </div>
+        <div class="bird-name" id="bird-name">—</div>
+        <div class="bird-scientific" id="bird-scientific"></div>
+        <div class="bird-desc" id="bird-desc"></div>
+        <div class="extra-block" id="cuckoo-extra" style="display:none">
+          <div class="ticker-wrap">
+            <div class="ticker-title"><span class="ticker-dot"></span>전국 뻐꾸기 목격 실시간 속보</div>
+            <div class="ticker-item"><span class="loc">강원도 춘천</span>남산면 공원 참나무 숲에서 목격<span class="ticker-time">2분 전</span></div>
+            <div class="ticker-item"><span class="loc">경기도 가평</span>자라섬 인근 갈대밭에서 울음소리 확인<span class="ticker-time">7분 전</span></div>
+            <div class="ticker-item"><span class="loc">충북 제천</span>청풍호 인근 산책로 활엽수림<span class="ticker-time">14분 전</span></div>
+            <div class="ticker-item"><span class="loc">전남 순천</span>순천만 갈대습지 탐방로 인근<span class="ticker-time">21분 전</span></div>
+          </div>
+        </div>
+        <div class="extra-block" id="pigeon-extra" style="display:none">
+          <button class="pigeon-btn" onclick="togglePigeonPanel()">🕊️ &nbsp;<span id="pigeon-btn-text">다양한 비둘기 종 더 알아보기 →</span></button>
+          <div id="pigeon-panel" style="display:none;margin-top:12px;display:none">
+            <div class="pigeon-card">
+              <div class="pigeon-card-title">🕊️ 집비둘기 <span>Columba livia domestica</span></div>
+              <div class="pigeon-card-desc">도시에서 가장 흔히 볼 수 있는 비둘기입니다. 회색 깃털에 목 부분의 무지갯빛 광택이 특징이며, 원래 바위 절벽에 살던 야생 비둘기를 사람이 길들인 것이 도시로 퍼진 종입니다.</div>
+            </div>
+            <div class="pigeon-card">
+              <div class="pigeon-card-title">🤍 염주비둘기 <span>Streptopelia decaocto</span></div>
+              <div class="pigeon-card-desc">목 뒤에 검은 반달 모양의 목걸이 무늬가 특징인 베이지색 비둘기입니다. 한국에서는 주로 농촌이나 도시 외곽에서 볼 수 있으며, 맑고 반복적인 울음소리로 유명합니다.</div>
+            </div>
+            <div class="pigeon-card">
+              <div class="pigeon-card-title">🪨 양비둘기 <span>Columba rupestris</span></div>
+              <div class="pigeon-card-desc">한국 토종 비둘기로, 집비둘기와 닮았지만 허리 부분이 흰색인 것이 차이점입니다. 주로 해안 절벽이나 산악 지대의 바위에 서식하며, 점점 보기 어려워지고 있는 종입니다.</div>
+            </div>
+            <div class="pigeon-card">
+              <div class="pigeon-card-title">🌿 녹색비둘기 <span>Treron sieboldii</span></div>
+              <div class="pigeon-card-desc">이름처럼 올리브 녹색 깃털을 가진 아름다운 비둘기입니다. 한국에서는 여름 철새로, 주로 울창한 산림에서 서식합니다. 과일을 주식으로 하며 나뭇가지 위에서 생활합니다.</div>
+            </div>
+          </div>
+        </div>
+        <div class="prob-list" id="prob-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>Powered by Teachable Machine &amp; TensorFlow.js · Eóus © 2026</footer>
+</div>
+
+<script>
+const MODEL_URL="https://teachablemachine.withgoogle.com/models/OHKE7Fdgk/";
+const BIRDS={
+  "sparrow":{label:"참새",theme:"sparrow",bgId:"bg-sparrow",scientific:"Passer montanus",desc:"참새는 참새목 참새과에 속하는 소형 조류로, 한국 전역에서 가장 흔히 볼 수 있는 텃새입니다. 갈색과 흑색의 무늬가 특징이며, 농촌과 도시 할 것 없이 사람 곁에서 살아갑니다.",sound:"sparrow",extras:[]},
+  "magpie":{label:"까치",theme:"magpie",bgId:"bg-magpie",scientific:"Pica pica",desc:"까치는 참새목 까마귀과에 속하는 새로, 한국을 비롯한 동아시아에 널리 서식합니다. 검은색과 흰색의 뚜렷한 깃털과 긴 꼬리가 특징이며, 지능이 높고 사회성이 뛰어난 새로 알려져 있습니다.",sound:"magpie",extras:[]},
+  "Pigeon":{label:"비둘기",theme:"pigeon",bgId:"bg-pigeon",scientific:"Columba livia",desc:"집비둘기는 비둘기목 비둘기과에 속하며 전 세계 도시에서 가장 친숙한 새입니다. 회색 깃털과 목 주변의 무지갯빛 광택이 특징이며, 뛰어난 귀소 본능 덕분에 과거에는 전서구로 활용되기도 했습니다. 잡식성으로 도시 환경에 매우 잘 적응한 새입니다.",sound:"pigeon",extras:["pigeon"]},
+  "cuckoo":{label:"뻐꾸기",theme:"cuckoo",bgId:"bg-cuckoo",scientific:"Cuculus canorus",desc:"뻐꾸기는 두견목 두견과에 속하는 여름 철새입니다. '뻐꾹' 하는 특유의 울음소리로 익숙하지만 실제로 모습을 포착하기는 쉽지 않은 새입니다. 탁란 습성으로 유명합니다.",sound:"cuckoo",extras:["cuckoo"]},
+  "background":{label:"배경",theme:"unknown",bgId:"bg-unknown",scientific:"",desc:"",sound:null,extras:[]}
+};
+let model=null,webcamRunning=false,webcamStream=null,animFrame=null,lastClassify=0,currentTheme="default",audioCtx=null;
+let soundTimer=null; // 15초 자동 정지용 타이머
+
+/* ── 소리 ── */
+function stopAllSounds(){
+  ["sparrow","magpie","pigeon","cuckoo"].forEach(id=>{
+    const a=document.getElementById("snd-"+id);
+    if(a){a.pause();a.currentTime=0;}
+  });
+  if(soundTimer){clearTimeout(soundTimer);soundTimer=null;}
+}
+
+function playSound(t){
+  stopAllSounds();
+  const audio=document.getElementById("snd-"+t);
+  if(audio){
+    audio.play().catch(e=>{});
+    // 15초 후 자동 정지
+    soundTimer=setTimeout(()=>{
+      audio.pause();
+      audio.currentTime=0;
+    },15000);
+  }
+}
+
+// 페이지 벗어날 때 소리 정지
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden) stopAllSounds();
+});
+
+/* ── 새 도감/상식 모달 (참새·까치·비둘기·뻐꾸기 공용) ── */
+const MODAL_DATA = {
+  sparrow: [
+    {emoji:"🐦",title:"유라시아 참새",sci:"Passer montanus",desc:"우리가 가장 흔히 보는 바로 그 참새입니다. 밤색 머리와 뺨의 검은 점이 특징이며, 한국·중국·일본 등 동아시아 전역에 서식합니다. 사람 사는 곳이라면 어디서든 볼 수 있는 친근한 텃새예요.",tags:["🌏 동아시아","🏡 텃새"]},
+    {emoji:"🏠",title:"집참새",sci:"Passer domesticus",desc:"유라시아 참새와 닮았지만 수컷의 가슴에 큰 검은 턱받이 무늬가 있는 게 특징입니다. 유럽·서아시아가 원산지이며 인간을 따라 전 세계 거의 모든 대륙으로 퍼진 참새입니다.",tags:["🌍 전 세계","🏙️ 도시형"]},
+    {emoji:"🎨",title:"금화조",sci:"Taeniopygia guttata",desc:"작고 알록달록한 참새목 조류입니다. 수컷은 주황색 뺨, 얼룩덜룩한 가슴, 붉은 부리가 특징이에요. 호주 원산이며, 아름다운 외모 덕분에 전 세계에서 인기 있는 애완용 새입니다.",tags:["🦘 호주","🎵 명금류"]},
+    {emoji:"✨",title:"황금참새",sci:"Passer luteus",desc:"수컷이 선명한 황금빛 노란색을 띠는 화려한 참새입니다. 아프리카 사헬 지역이 원산지이며, 밝은 노란색 몸통과 갈색 날개의 대비가 매우 아름답습니다. 무리 지어 이동하는 습성이 있어요.",tags:["🌍 아프리카","🌾 초원"]},
+    {emoji:"👴",title:"수염참새",sci:"Emberiza aureola",desc:"눈 아래로 이어지는 검은 수염 같은 무늬가 특징인 북방계 새입니다. 한국에는 봄·가을 이동 시기에 잠깐 볼 수 있는 나그네새예요. 한때 흔했지만 서식지 파괴로 개체수가 급감해 멸종위기 취약종입니다.",tags:["⚠️ 멸종위기","🍂 나그네새"]},
+    {emoji:"🤍",title:"흰참새",sci:"Passer montanus (leucistic)",desc:"일반 유라시아 참새에서 색소 이상으로 태어난 매우 희귀한 변이입니다. 멜라닌 색소가 줄어드는 백화증으로 온몸이 흰색이나 크림색을 띠어요. 전 세계에서도 목격 사례가 극히 드문, 살면서 한 번 보기 어려운 새입니다! ✨",tags:["💎 극희귀","🍀 행운의 새"],final:true,tada:"🎉 희귀종 등장!"}
+  ],
+  magpie: [
+    {emoji:"🧠",title:"거울을 알아보는 새",sci:"Pica pica",desc:"까치는 거울에 비친 자신의 모습을 인식할 수 있는 몇 안 되는 동물 중 하나입니다. 인간, 유인원, 돌고래, 코끼리 정도만 통과하는 '거울 자기인식 테스트'를 통과한 유일한 조류로 알려져 있어요.",tags:["🪞 자기인식","🐦‍⬛ 까마귀과"]},
+    {emoji:"🎊",title:"까치설날의 유래",sci:"전통 민속",desc:"\"까치까치 설날은 어저께고요\"라는 동요로 익숙한 '까치설날'은 음력 섣달그믐을 뜻합니다. 예로부터 까치는 반가운 손님이나 좋은 소식을 미리 알려주는 길조로 여겨져 왔어요.",tags:["🇰🇷 한국 문화","🍀 길조"]},
+    {emoji:"🏗️",title:"정교한 둥지 건축가",sci:"둥지 습성",desc:"까치의 둥지는 나뭇가지로 지붕까지 갖춘 돔 형태로 짓는 것이 특징입니다. 진흙으로 바닥을 다지고 잔가지를 얼기설기 엮어 튼튼하게 만들며, 한 쌍이 몇 주에 걸쳐 함께 완성합니다.",tags:["🌿 둥지","🤝 협력"]},
+    {emoji:"👀",title:"뛰어난 텃세와 기억력",sci:"행동 습성",desc:"까치는 자기 영역을 정확히 기억하고 지키는 텃세가 매우 강한 새입니다. 먹이를 숨겨둔 위치를 여러 곳 기억했다가 나중에 정확히 찾아가는 놀라운 공간 기억력을 가지고 있어요.",tags:["📍 텃세","🧩 기억력"]},
+    {emoji:"🤍",title:"흰까치",sci:"Pica pica (leucistic)",desc:"드물게 색소 이상으로 태어나는 흰색 까치입니다. 검은색과 흰색이 뚜렷한 일반 까치와 달리 몸 전체가 밝은 색을 띠는 백화증(leucism) 개체로, 목격되면 지역 뉴스에 나올 만큼 희귀합니다! ✨",tags:["💎 극희귀","📰 화제의 새"],final:true,tada:"🎉 희귀종 등장!"}
+  ],
+  pigeon: [
+    {emoji:"🕊️",title:"집비둘기",sci:"Columba livia domestica",desc:"도시에서 가장 흔히 볼 수 있는 비둘기입니다. 회색 깃털에 목 부분의 무지갯빛 광택이 특징이며, 원래 바위 절벽에 살던 야생 비둘기를 사람이 길들인 것이 도시로 퍼진 종입니다.",tags:["🏙️ 도시형","🪨 바위비둘기 후손"]},
+    {emoji:"🤍",title:"염주비둘기",sci:"Streptopelia decaocto",desc:"목 뒤에 검은 반달 모양의 목걸이 무늬가 특징인 베이지색 비둘기입니다. 한국에서는 주로 농촌이나 도시 외곽에서 볼 수 있으며, 맑고 반복적인 울음소리로 유명합니다.",tags:["🌾 농촌","🎵 울음소리"]},
+    {emoji:"🪨",title:"양비둘기",sci:"Columba rupestris",desc:"한국 토종 비둘기로, 집비둘기와 닮았지만 허리 부분이 흰색인 것이 차이점입니다. 주로 해안 절벽이나 산악 지대의 바위에 서식하며, 점점 보기 어려워지고 있는 종입니다.",tags:["🇰🇷 토종","⛰️ 산악·해안"]},
+    {emoji:"🌿",title:"녹색비둘기",sci:"Treron sieboldii",desc:"이름처럼 올리브 녹색 깃털을 가진 아름다운 비둘기입니다. 한국에서는 여름 철새로, 주로 울창한 산림에서 서식합니다. 과일을 주식으로 하며 나뭇가지 위에서 생활합니다.",tags:["🌳 산림","🍇 과일식"]},
+    {emoji:"📡",title:"전서구, 길 찾는 비둘기",sci:"Columba livia (homing)",desc:"비둘기는 지구 자기장과 태양의 위치를 감지해 수백 km 떨어진 곳에서도 집을 정확히 찾아오는 놀라운 귀소 본능을 가지고 있습니다. 이 능력 덕분에 과거 전쟁과 통신에서 편지를 전달하는 전서구로 활약했어요! ✨",tags:["💎 특별한 능력","📮 전서구"],final:true,tada:"🎉 특별한 능력!"}
+  ],
+  cuckoo: [
+    {emoji:"🥚",title:"탁란, 남의 둥지에 알 낳기",sci:"Cuculus canorus",desc:"뻐꾸기는 스스로 둥지를 짓지 않고 개개비 같은 다른 새의 둥지에 몰래 알을 낳는 '탁란' 습성으로 유명합니다. 숙주 새가 자기 알인 줄 알고 대신 품고 키우게 만드는 전략이에요.",tags:["🪺 탁란","🎭 위장 전략"]},
+    {emoji:"🎨",title:"알 색깔까지 위장",sci:"의태 습성",desc:"뻐꾸기는 숙주 새 둥지의 알과 색깔·무늬가 비슷한 알을 낳도록 진화했습니다. 숙주 종에 따라 알의 색이 조금씩 다르게 나타날 정도로 정교한 위장술을 갖추고 있어요.",tags:["🥚 의태","🧬 진화"]},
+    {emoji:"💪",title:"태어나자마자 시작되는 생존 경쟁",sci:"부화 후 행동",desc:"뻐꾸기 새끼는 부화하자마자 등으로 숙주 새의 알이나 다른 새끼들을 둥지 밖으로 밀어냅니다. 그 결과 양부모의 먹이를 독차지하며 빠르게 자랄 수 있게 됩니다.",tags:["⚠️ 치열한 생존","🪶 단독 육추"]},
+    {emoji:"🦅",title:"매 흉내내기",sci:"의태 전략",desc:"어미 뻐꾸기는 몸의 줄무늬가 새매와 비슷해서, 숙주 새 둥지에 접근할 때 매처럼 보이도록 위장해 숙주 새를 겁먹게 만들고 둥지를 비우게 만듭니다.",tags:["🦅 의태","😨 위협 전략"]},
+    {emoji:"🌍",title:"세계 곳곳의 뻐꾸기들",sci:"Cuculidae",desc:"전 세계에는 검은뻐꾸기, 매사촌, 두견이 등 150종이 넘는 두견과 새들이 있습니다. 한국에서는 여름철 '뻐꾹' 소리가 들리기 시작하면 본격적인 여름이 왔다는 신호로 여겨져 왔어요! ✨",tags:["💎 150종 이상","🌏 전 세계 분포"],final:true,tada:"🎉 알고 보면 큰 가족!"}
+  ]
+};
+
+let currentModalBird = "sparrow";
+let currentCard = 0;
+
+function openBirdModal(birdKey){
+  currentModalBird = birdKey;
+  currentCard = 0;
+  renderCards(birdKey);
+  document.getElementById("bird-modal").classList.add("open");
+  updateCard();
+  buildDots();
+}
+
+function closeBirdModal(e){
+  if(e.target === document.getElementById("bird-modal")){
+    document.getElementById("bird-modal").classList.remove("open");
+  }
+}
+
+function renderCards(birdKey){
+  const cards = MODAL_DATA[birdKey];
+  const track = document.getElementById("card-track");
+  track.innerHTML = "";
+  cards.forEach((c,i)=>{
+    const el = document.createElement("div");
+    el.className = "sparrow-card" + (c.final?" final":"");
+    const tagsHtml = c.tags.map(t=>`<span>${t}</span>`).join("");
+    el.innerHTML = `
+      <div class="card-num">${String(i+1).padStart(2,"0")} / ${String(cards.length).padStart(2,"0")}</div>
+      ${c.final?`<div class="tada-text">${c.tada}</div>`:""}
+      <span class="card-emoji">${c.emoji}</span>
+      <div class="card-title">${c.title}</div>
+      <div class="card-sci">${c.sci}</div>
+      <div class="card-desc">${c.desc}</div>
+      <div class="card-tag">${tagsHtml}</div>
+    `;
+    track.appendChild(el);
+  });
+}
+
+function buildDots(){
+  const total = MODAL_DATA[currentModalBird].length;
+  const dotsEl = document.getElementById("nav-dots");
+  dotsEl.innerHTML = "";
+  for(let i=0; i<total; i++){
+    const d = document.createElement("div");
+    d.className = "nav-dot" + (i===0?" active":"");
+    d.onclick = () => goToCard(i);
+    dotsEl.appendChild(d);
+  }
+}
+
+function updateCard(){
+  const total = MODAL_DATA[currentModalBird].length;
+  // 슬라이드
+  document.getElementById("card-track").style.transform = "translateX(-"+currentCard+"00%)";
+  // 도트
+  document.querySelectorAll(".nav-dot").forEach((d,i)=>{
+    d.classList.toggle("active", i===currentCard);
+  });
+  // 화살표
+  document.getElementById("nav-prev").disabled = currentCard===0;
+  document.getElementById("nav-next").disabled = currentCard===total-1;
+  // 마지막 카드 도달 시 반짝이 효과
+  if(currentCard===total-1) launchSparkles();
+}
+
+function moveCard(dir){
+  const total = MODAL_DATA[currentModalBird].length;
+  const next = currentCard + dir;
+  if(next<0||next>=total) return;
+  currentCard = next;
+  updateCard();
+}
+
+function goToCard(idx){
+  currentCard = idx;
+  updateCard();
+}
+
+function launchSparkles(){
+  const container = document.getElementById("modal-sparkle");
+  container.innerHTML = "";
+  const emojis = ["✨","⭐","🌟","💫","🤍","❄️"];
+  for(let i=0; i<18; i++){
+    const s = document.createElement("span");
+    s.textContent = emojis[Math.floor(Math.random()*emojis.length)];
+    s.style.left = Math.random()*100+"%";
+    s.style.top = "-20px";
+    s.style.animationDelay = (Math.random()*1.2)+"s";
+    s.style.fontSize = (12+Math.random()*14)+"px";
+    container.appendChild(s);
+  }
+  setTimeout(()=>container.innerHTML="", 3000);
+}
+
+// 키보드 방향키 지원
+document.addEventListener("keydown", e=>{
+  if(!document.getElementById("bird-modal").classList.contains("open")) return;
+  if(e.key==="ArrowRight") moveCard(1);
+  if(e.key==="ArrowLeft") moveCard(-1);
+  if(e.key==="Escape") document.getElementById("bird-modal").classList.remove("open");
+});
+
+function togglePigeonPanel(){
+  const panel=document.getElementById("pigeon-panel");
+  const btnText=document.getElementById("pigeon-btn-text");
+  const isOpen=panel.style.display==="block";
+  panel.style.display=isOpen?"none":"block";
+  btnText.textContent=isOpen?"다양한 비둘기 종 더 알아보기 →":"접기 ↑";
+}
+
+/* ── 테마 ── */
+function setTheme(name){
+  if(name===currentTheme)return;currentTheme=name;
+  document.body.className="theme-"+name;
+  document.querySelectorAll(".bg-layer").forEach(el=>el.classList.remove("active"));
+  const t=document.getElementById("bg-"+name);
+  if(t)t.classList.add("active");else document.getElementById("bg-default").classList.add("active");
+}
+
+/* ── 화면 전환 ── */
+function goToClassifier(mode){
+  document.getElementById("home-screen").style.display="none";
+  document.getElementById("classifier-screen").style.display="block";
+  loadModel();
+  if(mode==="camera")setTimeout(toggleCamera,300);
+  if(mode==="upload")setTimeout(()=>document.getElementById("file-input").click(),200);
+}
+function goHome(){
+  stopCamera();stopAllSounds();setTheme("default");
+  document.getElementById("home-screen").style.display="block";
+  document.getElementById("classifier-screen").style.display="none";
+  resetResult();
+}
+
+/* ── 모델 ── */
+async function loadModel(){
+  if(model)return model;
+  showStatus("모델을 불러오는 중...");
+  try{model=await tmImage.load(MODEL_URL+"model.json",MODEL_URL+"metadata.json");showStatus("");}
+  catch(e){showStatus("모델 로딩 실패. 네트워크를 확인해주세요.");}
+  return model;
+}
+function showStatus(msg){const el=document.getElementById("status-msg");el.textContent=msg;el.classList.toggle("visible",!!msg)}
+function showAnalyzing(s){document.getElementById("analyzing").style.display=s?"flex":"none"}
+
+async function classify(src){
+  const m=await loadModel();if(!m)return;
+  showAnalyzing(true);
+  try{const p=await m.predict(src);showAnalyzing(false);displayResults(p);}
+  catch(e){showAnalyzing(false);showStatus("분류 중 오류가 발생했습니다.")}
+}
+
+/* ── 결과 표시 ── */
+function displayResults(preds){
+  preds.sort((a,b)=>b.probability-a.probability);
+  const top=preds[0];const conf=(top.probability*100).toFixed(1);const name=top.className;
+
+  // 실시간 카메라 모드: 상단 미니 배지만 업데이트
+  if(webcamRunning){
+    const liveConfEl=document.getElementById("live-confidence");
+    liveConfEl.style.display="flex";
+    const liveLabel=BIRDS[name]?BIRDS[name].label:name;
+    liveConfEl.innerHTML=`<span class="conf-label">인식 결과</span><span>${liveLabel} ${conf}%</span>`;
+  }
+
+  const isUnknown=name==="background";
+  document.getElementById("unknown-msg").classList.remove("visible");
+  document.getElementById("result-panel").classList.remove("visible");
+  document.getElementById("result-divider").style.display="none";
+  document.getElementById("cuckoo-extra").style.display="none";
+  document.getElementById("pigeon-extra").style.display="none";
+  if(isUnknown||!BIRDS[name]){setTheme("unknown");stopAllSounds();document.getElementById("unknown-msg").classList.add("visible");return}
+  const bird=BIRDS[name];
+  setTheme(bird.theme);playSound(bird.sound);
+  document.getElementById("bird-name").textContent=bird.label;
+  document.getElementById("bird-scientific").textContent=bird.scientific;
+  document.getElementById("bird-desc").textContent=bird.desc;
+  document.getElementById("conf-badge").textContent="신뢰도 "+conf+"%";
+  if(bird.extras.includes("cuckoo"))document.getElementById("cuckoo-extra").style.display="block";
+  if(bird.extras.includes("Pigeon")||bird.extras.includes("pigeon"))document.getElementById("pigeon-extra").style.display="block";
+  const list=document.getElementById("prob-list");list.innerHTML="";
+  preds.forEach((p,i)=>{
+    const pct=(p.probability*100).toFixed(1);
+    const row=document.createElement("div");row.className="prob-row";
+    const rowLabel=BIRDS[p.className]?BIRDS[p.className].label:p.className;
+    row.innerHTML=`<span class="prob-name">${rowLabel}</span><div class="prob-track"><div class="prob-fill${i===0?" top":""}" style="width:${pct}%"></div></div><span class="prob-pct">${pct}%</span>`;
+    list.appendChild(row);
+  });
+  document.getElementById("result-divider").style.display="block";
+  document.getElementById("result-panel").classList.add("visible");
+  showStatus("");
+}
+
+function resetResult(){
+  document.getElementById("unknown-msg").classList.remove("visible");
+  document.getElementById("result-panel").classList.remove("visible");
+  document.getElementById("result-divider").style.display="none";
+  document.getElementById("placeholder").style.display="flex";
+  document.getElementById("preview-img").style.display="none";
+  document.getElementById("webcam-video").style.display="none";
+  document.getElementById("live-confidence").style.display="none";
+}
+
+/* ── 사진 찍기 (캡처 후 AI 판독) ── */
+function captureAndClassify(){
+  const video=document.getElementById("webcam-video");
+  const canvas=document.createElement("canvas");
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
+  // 화면은 scaleX(-1) 반전이지만 AI 판독은 원본으로 (반전 보정 불필요 — 모델도 정방향으로 학습됨)
+  canvas.getContext("2d").drawImage(video,0,0);
+  // 캡처 이미지를 미리보기로 전환
+  const img=document.getElementById("preview-img");
+  img.src=canvas.toDataURL("image/jpeg");
+  // 카메라 중단 후 미리보기 표시
+  stopCamera();
+  img.style.display="block";
+  document.getElementById("placeholder").style.display="none";
+  img.onload=async()=>await classify(img);
+}
+
+/* ── 카메라 ── */
+async function toggleCamera(){
+  if(webcamRunning){stopCamera();return}
+  try{
+    webcamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false});
+    const video=document.getElementById("webcam-video");
+    video.srcObject=webcamStream;video.style.display="block";
+  // 전면 카메라일 때만 반전
+    const facingMode = webcamStream.getVideoTracks()[0].getSettings().facingMode;
+    if(facingMode === "user") {
+      video.style.transform = "scaleX(-1)";
+    } else {
+      video.style.transform = "scaleX(1)";
+    }
+    
+    document.getElementById("placeholder").style.display="none";
+    document.getElementById("preview-img").style.display="none";
+    document.getElementById("live-badge").style.display="flex";
+    document.getElementById("live-confidence").style.display="flex";
+    document.getElementById("live-confidence").innerHTML='<span class="conf-label">인식 결과</span><span>분석 대기 중...</span>';
+    document.getElementById("capture-overlay").style.display="block";
+    document.getElementById("btn-camera").innerHTML='<svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/></svg> 카메라 끄기';
+    webcamRunning=true;await loadModel();loopCamera();
+  }catch(e){showStatus("카메라 권한이 필요합니다. 브라우저 설정에서 카메라를 허용해주세요.")}
+}
+
+async function loopCamera(){
+  if(!webcamRunning)return;
+  const now=Date.now();
+  if(now-lastClassify>1200&&model){
+    lastClassify=now;
+    const video=document.getElementById("webcam-video");
+    if(video.readyState>=2){
+      const c=document.createElement("canvas");c.width=video.videoWidth;c.height=video.videoHeight;
+      c.getContext("2d").drawImage(video,0,0);
+      try{const p=await model.predict(c);displayResults(p);}
+      catch(e){}
+    }
+  }
+  animFrame=requestAnimationFrame(loopCamera);
+}
+
+function stopCamera(){
+  webcamRunning=false;if(animFrame)cancelAnimationFrame(animFrame);
+  if(webcamStream)webcamStream.getTracks().forEach(t=>t.stop());
+  const v=document.getElementById("webcam-video");v.srcObject=null;v.style.display="none";
+  document.getElementById("live-badge").style.display="none";
+  document.getElementById("live-confidence").style.display="none";
+  document.getElementById("capture-overlay").style.display="none";
+  document.getElementById("btn-camera").innerHTML='<svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> 카메라 켜기';
+}
+
+/* ── 파일 업로드 ── */
+async function handleFileUpload(e){
+  const file=e.target.files[0];if(!file)return;stopCamera();
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const img=document.getElementById("preview-img");img.src=ev.target.result;img.style.display="block";
+    document.getElementById("placeholder").style.display="none";
+    img.onload=async()=>await classify(img);
+  };
+  reader.readAsDataURL(file);e.target.value="";
+}
+</script>
+</body>
+</html>0.
