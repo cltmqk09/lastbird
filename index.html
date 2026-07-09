@@ -65,6 +65,9 @@ body.theme-unknown .card{border-color:rgba(50,140,80,0.3)}
 .live-confidence .conf-label{font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:0.1em;text-transform:uppercase}
 /* 사진찍기 버튼 - 카메라 존 하단 중앙 오버레이 */
 .capture-btn-overlay{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:none;z-index:3}
+.zoom-control{position:absolute;right:12px;top:50%;transform:translateY(-50%);display:none;flex-direction:column;align-items:center;gap:8px;z-index:3;background:rgba(10,22,40,0.72);border:0.5px solid var(--border);border-radius:20px;padding:10px 8px;backdrop-filter:blur(4px)}
+.zoom-label{font-size:11px;color:var(--text-secondary);font-weight:500;letter-spacing:0.02em}
+.zoom-slider{writing-mode:vertical-lr;direction:rtl;width:6px;height:110px;accent-color:var(--accent-bright);cursor:pointer;background:transparent}
 .btn-capture-shutter{width:60px;height:60px;border-radius:50%;border:3px solid rgba(255,255,255,0.9);background:rgba(255,255,255,0.15);backdrop-filter:blur(4px);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background 0.15s,transform 0.1s;box-shadow:0 0 0 4px rgba(255,255,255,0.15)}
 .btn-capture-shutter:hover{background:rgba(255,255,255,0.3)}
 .btn-capture-shutter:active{transform:scale(0.92)}
@@ -268,6 +271,12 @@ footer{text-align:center;margin-top:36px;font-size:12px;color:var(--text-muted)}
           </button>
         </div>
 
+        <!-- 줌 슬라이더 (줌 지원 카메라에서만 표시) -->
+        <div class="zoom-control" id="zoom-control">
+          <span class="zoom-label" id="zoom-label">1.0x</span>
+          <input type="range" id="zoom-slider" class="zoom-slider" min="1" max="1" step="0.1" value="1">
+        </div>
+
         <div class="analyzing-overlay" id="analyzing"><div class="spinner"></div><p>분류 중...</p></div>
       </div>
 
@@ -348,6 +357,7 @@ const BIRDS={
   "background":{label:"배경",theme:"unknown",bgId:"bg-unknown",scientific:"",desc:"",sound:null,extras:[]}
 };
 let model=null,webcamRunning=false,webcamStream=null,animFrame=null,lastClassify=0,currentTheme="default",audioCtx=null;
+let currentZoomTrack=null;
 let soundTimer=null; // 15초 자동 정지용 타이머
 
 /* ── 소리 ── */
@@ -654,7 +664,9 @@ async function toggleCamera(){
     document.getElementById("live-confidence").innerHTML='<span class="conf-label">인식 결과</span><span>분석 대기 중...</span>';
     document.getElementById("capture-overlay").style.display="block";
     document.getElementById("btn-camera").innerHTML='<svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/></svg> 카메라 끄기';
-    webcamRunning=true;await loadModel();loopCamera();
+    webcamRunning=true;
+    setupZoom(webcamStream.getVideoTracks()[0]);
+    await loadModel();loopCamera();
   }catch(e){showStatus("카메라 권한이 필요합니다. 브라우저 설정에서 카메라를 허용해주세요.")}
 }
 
@@ -681,8 +693,73 @@ function stopCamera(){
   document.getElementById("live-badge").style.display="none";
   document.getElementById("live-confidence").style.display="none";
   document.getElementById("capture-overlay").style.display="none";
+  document.getElementById("zoom-control").style.display="none";
+  currentZoomTrack=null;
   document.getElementById("btn-camera").innerHTML='<svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> 카메라 켜기';
 }
+
+/* ── 줌 (슬라이더 + 핀치 제스처) ── */
+function setupZoom(track){
+  currentZoomTrack=track;
+  const wrap=document.getElementById("zoom-control");
+  const slider=document.getElementById("zoom-slider");
+  const label=document.getElementById("zoom-label");
+  const caps=track.getCapabilities?track.getCapabilities():{};
+  if(caps.zoom&&caps.zoom.max>caps.zoom.min){
+    wrap.style.display="flex";
+    slider.min=caps.zoom.min;
+    slider.max=caps.zoom.max;
+    slider.step=caps.zoom.step||0.1;
+    const settings=track.getSettings?track.getSettings():{};
+    const startZoom=settings.zoom||caps.zoom.min;
+    slider.value=startZoom;
+    label.textContent=parseFloat(startZoom).toFixed(1)+"x";
+    slider.oninput=()=>{
+      const val=parseFloat(slider.value);
+      track.applyConstraints({advanced:[{zoom:val}]}).catch(()=>{});
+      label.textContent=val.toFixed(1)+"x";
+    };
+  }else{
+    wrap.style.display="none";
+  }
+}
+
+function pinchDistance(touches){
+  const dx=touches[0].clientX-touches[1].clientX;
+  const dy=touches[0].clientY-touches[1].clientY;
+  return Math.sqrt(dx*dx+dy*dy);
+}
+
+let pinchStartDist=null,pinchStartZoom=null;
+
+(function initPinchZoom(){
+  const zone=document.getElementById("camera-zone");
+  zone.addEventListener("touchstart",e=>{
+    if(e.touches.length===2&&currentZoomTrack){
+      const caps=currentZoomTrack.getCapabilities?currentZoomTrack.getCapabilities():{};
+      if(!caps.zoom)return;
+      pinchStartDist=pinchDistance(e.touches);
+      pinchStartZoom=parseFloat(document.getElementById("zoom-slider").value);
+    }
+  },{passive:true});
+  zone.addEventListener("touchmove",e=>{
+    if(e.touches.length===2&&pinchStartDist&&currentZoomTrack){
+      const caps=currentZoomTrack.getCapabilities?currentZoomTrack.getCapabilities():{};
+      if(!caps.zoom)return;
+      const newDist=pinchDistance(e.touches);
+      const scale=newDist/pinchStartDist;
+      let newZoom=pinchStartZoom*scale;
+      newZoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,newZoom));
+      const slider=document.getElementById("zoom-slider");
+      slider.value=newZoom;
+      currentZoomTrack.applyConstraints({advanced:[{zoom:newZoom}]}).catch(()=>{});
+      document.getElementById("zoom-label").textContent=newZoom.toFixed(1)+"x";
+    }
+  },{passive:true});
+  zone.addEventListener("touchend",e=>{
+    if(e.touches.length<2){pinchStartDist=null;pinchStartZoom=null;}
+  },{passive:true});
+})();
 
 /* ── 파일 업로드 ── */
 async function handleFileUpload(e){
@@ -697,4 +774,4 @@ async function handleFileUpload(e){
 }
 </script>
 </body>
-</html>0.
+</html>
